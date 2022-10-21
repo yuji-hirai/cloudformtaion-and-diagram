@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Slack Channel ID
+        Parameters:
+          - SlackChannelID
+      - Label:
+          default: Chatbot Workspace ID
+        Parameters:
+          - ChatbotWorkspaceId
+
+Parameters:
+  PJPrefix:
+    Type: String
+  SlackChannelID:
+    Type: String
+  ChatbotWorkspaceId:
+    Type: String
+
+Resources:
+  PipelineNotificationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${PJPrefix}-codepipeline
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: chatbot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
+
+  PipelineNotification:
+    Type: AWS::Chatbot::SlackChannelConfiguration
+    Properties:
+      ConfigurationName: !Sub ${PJPrefix}-codepipeline
+      IamRoleArn: !GetAtt PipelineNotificationRole.Arn
+      LoggingLevel: ERROR
+      SlackChannelId: !Ref SlackChannelID
+      SlackWorkspaceId: !Ref ChatbotWorkspaceId
+
+Outputs:
+  PipelineName:
+    Value: !Ref PipelineNotification
+    Export:
+      Name: !Sub ${PJPrefix}-codepipeline

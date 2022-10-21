@@ -1,0 +1,14 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Once per account
+Resources:
+  SourceConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: CodeStarConnections
+      ProviderType: GitHub
+
+Outputs:
+  SourceConnection:
+    Value: !Ref SourceConnection
+    Export:
+      Name: CodeStarConnections-ARN

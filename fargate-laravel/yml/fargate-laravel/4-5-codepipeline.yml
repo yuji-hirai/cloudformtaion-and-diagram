@@ -1,0 +1,354 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Environment
+        Parameters:
+          - Environment
+      - Label: default:'GitHub
+        Parameters:
+          - OrganizationName
+          - GitHubRepositoryName
+          - Branch
+      - Label:
+          default: Fargate For ECS Configuration
+        Parameters:
+          - ContainerPHP
+          - ContainerNginx
+          - ECSServiceName
+      - Label:
+          default: Lambda For CloudFront Cache Clear In Codepipeline
+        Parameters:
+          - LambdaName
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  ContainerPHP:
+    Type: String
+    Default: php
+  ContainerNginx:
+    Type: String
+    Default: nginx
+  ECSServiceName:
+    Type: String
+    Default: laravel
+  OrganizationName:
+    Type: String
+    Default: quailinc
+  GitHubRepositoryName:
+    Type: String
+    Default: ''
+  Branch:
+    Description: For example main develop fix..
+    Type: String
+  LambdaName:
+    Type: String
+    Default: cf-cache-clear-in-codepipeline
+
+Resources:
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+      Source:
+        GitCloneDepth: 1
+        GitSubmodulesConfig:
+          FetchSubmodules: false
+        InsecureSsl: false
+        Location: !Sub https://github.com/${OrganizationName}/${GitHubRepositoryName}
+        ReportBuildStatus: false
+        Type: GITHUB
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Cache:
+        Modes:
+          - LOCAL_DOCKER_LAYER_CACHE
+          - LOCAL_SOURCE_CACHE
+        Type: LOCAL
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Type: PLAINTEXT
+            Value: !Ref AWS::Region
+          - Name: IMAGE_REPO_NAME_1
+            Type: PLAINTEXT
+            Value: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerPHP}
+          - Name: CONTAINER_NAME_1
+            Type: PLAINTEXT
+            Value: !Ref ContainerPHP
+          - Name: IMAGE_REPO_NAME_2
+            Type: PLAINTEXT
+            Value: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerNginx}
+          - Name: CONTAINER_NAME_2
+            Type: PLAINTEXT
+            Value: !Ref ContainerNginx
+          - Name: IMAGE_TAG
+            Type: PLAINTEXT
+            Value: !Ref Environment
+          - Name: AWS_ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Ref AWS::AccountId
+          - Name: DOCKER_USER
+            Type: SECRETS_MANAGER
+            Value: !Sub
+              - ${SecretsManagerARN}:DOCKER_USER
+              - SecretsManagerARN: !ImportValue SecretsManagerARN-Of-DockerToken
+          - Name: DOCKER_TOKEN
+            Type: SECRETS_MANAGER
+            Value: !Sub
+              - ${SecretsManagerARN}:DOCKER_TOKEN
+              - SecretsManagerARN: !ImportValue SecretsManagerARN-Of-DockerToken
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Type: LINUX_CONTAINER
+      ServiceRole: !GetAtt IAMRole.Arn
+      TimeoutInMinutes: 60
+      QueuedTimeoutInMinutes: 480
+      EncryptionKey: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3
+      BadgeEnabled: false
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+        S3Logs:
+          Status: DISABLED
+          EncryptionDisabled: false
+      Visibility: PRIVATE
+
+  IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub codebuild-${PJPrefix}-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref IAMPolicy
+
+  IAMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub CodeBuildBasePolicy-${PJPrefix}--${ECSServiceName}-${Environment}-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - ecr:CompleteLayerUpload
+              - ecr:GetAuthorizationToken
+              - ecr:UploadLayerPart
+              - ecr:InitiateLayerUpload
+              - ecr:BatchCheckLayerAvailability
+              - ecr:PutImage
+              - secretsmanager:GetSecretValue
+          - Resource:
+              - !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/*
+              - 'arn:aws:s3:::*'
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*
+            Effect: Allow
+            Action:
+              - s3:GetBucketAcl
+              - logs:CreateLogGroup
+              - logs:PutLogEvents
+              - codebuild:CreateReportGroup
+              - codebuild:CreateReport
+              - s3:PutObject
+              - s3:GetObject
+              - logs:CreateLogStream
+              - codebuild:UpdateReport
+              - codebuild:BatchPutCodeCoverages
+              - codebuild:BatchPutTestCases
+              - s3:GetBucketLocation
+              - s3:GetObjectVersion
+          - Resource:
+              - !Sub arn:aws:ssm:*:${AWS::AccountId}:parameter/*
+            Effect: Allow
+            Action:
+              - ssm:GetParameters
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+              - Resource: '*'
+                Effect: Allow
+                Action:
+                  - codecommit:GetRepository
+                  - codecommit:ListBranches
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+                  - codecommit:CancelUploadArchive
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - codebuild:StartBuild
+                  - codebuild:StopBuild
+                  - codebuild:BatchGet*
+                  - codebuild:Get*
+                  - codebuild:List*
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codestar-connections:CreateConnection
+                  - codestar-connections:DeleteConnection
+                  - codestar-connections:UseConnection
+                  - codestar-connections:GetConnection
+                  - codestar-connections:ListConnections
+                  - codestar-connections:TagResource
+                  - codestar-connections:ListTagsForResource
+                  - codestar-connections:UntagResource
+                  - codestar-connections:PassConnection
+                  - s3:*
+                  - ecs:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - iam:PassRole
+                  - lambda:InvokeFunction
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${PJPrefix}-codepipeline-${AWS::Region}-${AWS::AccountId}-${Environment}
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                ConnectionArn: !ImportValue CodeStarConnections-ARN
+                FullRepositoryId: !Sub ${OrganizationName}/${GitHubRepositoryName}
+                OutputArtifactFormat: CODE_ZIP
+                BranchName: !Ref Branch
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildVariables
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName:
+                  Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-cluster
+                ServiceName:
+                  Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+                FileName: imagedefinitions.json
+              RunOrder: 1
+              InputArtifacts:
+                - Name: BuildVariables
+        - Name: Cf-cache-clear
+          Actions:
+            - Name: Cf-cache-clear
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: 1
+              Configuration:
+                FunctionName:
+                  Fn::ImportValue: !Ref LambdaName
+                UserParameters: !Sub
+                  - '{"PipelineName": "${CodePipeline}", "DistributionId": "${CloudFrontDistribution}" }'
+                  - CodePipeline: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+                    CloudFrontDistribution:
+                      Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-id
+              Region: !Ref AWS::Region
+              RunOrder: 1
+
+  CodeStarNotificationsNotificationRule:
+    Type: AWS::CodeStarNotifications::NotificationRule
+    Properties:
+      DetailType: FULL
+      EventTypeIds:
+        - codepipeline-pipeline-action-execution-succeeded
+        - codepipeline-pipeline-action-execution-failed
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+      Resource: !Sub
+        - arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipelineName}
+        - CodePipelineName: !Ref Pipeline
+      Status: ENABLED
+      Targets:
+        - TargetType: AWSChatbotSlack
+          TargetAddress:
+            Fn::ImportValue: !Sub ${PJPrefix}-codepipeline
+
+Outputs:
+  PipelineName:
+    Value: !Ref Pipeline
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-codepipeline-name

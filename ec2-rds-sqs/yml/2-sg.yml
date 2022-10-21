@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: sg
+
+Resources:
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: elb
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: elb
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: ec2
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: ec2
+
+  WebSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: elb
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !GetAtt [ELBSecurityGroup, GroupId]
+      GroupId: !GetAtt [WebSecurityGroup, GroupId]
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: rds
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: rds
+
+  SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: ec2
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !GetAtt [WebSecurityGroup, GroupId]
+      GroupId: !GetAtt [RDSSecurityGroup, GroupId]
+
+Outputs:
+  WebSecurityGroup:
+    Value: !Ref WebSecurityGroup
+    Export:
+      Name: ec2
+  ELBSecurityGroup:
+    Value: !Ref ELBSecurityGroup
+    Export:
+      Name: elb
+  RDSSecurityGroup:
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: rds

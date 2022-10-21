@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: RDS Configuration
+        Parameters:
+          - DatabaseName
+          - Environment
+          - EngineType
+          - DBInstanceClass
+          - MySQLMajorVersion
+          - MySQLMinorVersion
+          - MasterUsername
+          - MasterUserPassword
+      - Label:
+          default: Redis Configuration
+        Parameters:
+          - RedisEngineVersion
+          - RedisNodeType
+          - RedisParameterGroup
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  DatabaseName:
+    Type: String
+    Default: ''
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  EngineType:
+    Type: String
+    Default: aurora-mysql
+  MySQLMajorVersion:
+    Type: String
+    Description: For example 5.7
+  MySQLMinorVersion:
+    Type: String
+    Description: For example 2.10.2
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.small
+  MasterUsername:
+    Type: String
+    MinLength: 4
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  MasterUserPassword:
+    NoEcho: true
+    Type: String
+    MinLength: 4
+    MaxLength: 50
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  RedisNodeType:
+    Type: String
+    Description: For example cache.t4g.micro
+  RedisEngineVersion:
+    Type: String
+    Description: For example 6.2
+  RedisParameterGroup:
+    Type: String
+    Description: For example default.redis6.x.cluster.on
+
+Resources:
+  ElastiCacheReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: Delete
+    Properties:
+      # シャード数1,レプリカ0
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: 0
+      ReplicationGroupId: !Sub ${PJPrefix}-laravel-${Environment}
+      ReplicationGroupDescription: ''
+      AutomaticFailoverEnabled: true
+      Port: 6379
+      SnapshotRetentionLimit: 0
+      SnapshotWindow: 16:00-17:00
+      PreferredMaintenanceWindow: tue:18:00-tue:19:00
+      CacheNodeType: !Ref RedisNodeType
+      TransitEncryptionEnabled: false
+      AtRestEncryptionEnabled: false
+      CacheParameterGroupName: !Ref RedisParameterGroup
+      CacheSubnetGroupName: !Ref ElastiCacheSubnetGroup
+      Engine: redis
+      EngineVersion: !Ref RedisEngineVersion
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${PJPrefix}-redis-${Environment}
+      MultiAZEnabled: false
+      AutoMinorVersionUpgrade: false
+
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: ''
+      CacheSubnetGroupName: !Sub ${PJPrefix}-laravel-${Environment}
+      SubnetIds:
+        - !ImportValue private-subnet-a
+        - !ImportValue private-subnet-c
+        - !ImportValue private-subnet-d
+
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Delete
+    Properties:
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      Engine: !Ref EngineType
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      BackupRetentionPeriod: 7
+      VpcSecurityGroupIds:
+        - Fn::ImportValue: !Sub ${PJPrefix}-rds-${Environment}
+      PreferredBackupWindow: 16:00-17:00
+      DatabaseName: !Ref DatabaseName
+      DBClusterIdentifier: !Sub ${PJPrefix}-${Environment}
+      DeletionProtection: false
+      EngineMode: provisioned
+      EngineVersion: !Sub ${MySQLMajorVersion}.mysql_aurora.${MySQLMinorVersion}
+      PreferredMaintenanceWindow: tue:18:00-tue:19:00
+      StorageEncrypted: true
+
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Family: aurora-mysql5.7
+      Description: !Sub ${PJPrefix}-DBClusterParameterGroup-${Environment}
+      Parameters:
+        time_zone: Asia/Tokyo
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBParameterGroupName: !Ref DBParameterGroup
+      Engine: !Ref EngineType
+      EngineVersion: !Sub ${MySQLMajorVersion}.mysql_aurora.${MySQLMinorVersion}
+      DBClusterIdentifier: !Ref DBCluster
+      PubliclyAccessible: false
+      AvailabilityZone: !Sub ${AWS::Region}c
+      DBInstanceClass: !Ref DBInstanceClass
+      AutoMinorVersionUpgrade: false
+      DBInstanceIdentifier: !Sub ${PJPrefix}-instance-${Environment}
+      EnablePerformanceInsights: false
+      PreferredMaintenanceWindow: tue:18:00-tue:19:00
+      PromotionTier: 1
+      MonitoringInterval: 0
+
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: !Sub ${EngineType}${MySQLMajorVersion}
+      Description: !Sub ${PJPrefix}-DBParameterGroup-${Environment}
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${PJPrefix}-subnet-${Environment}
+      DBSubnetGroupDescription: '-'
+      SubnetIds:
+        - !ImportValue private-subnet-a
+        - !ImportValue private-subnet-c
+        - !ImportValue private-subnet-d
+
+Outputs:
+  ClusterName:
+    Value: !Ref DBCluster
+    Export:
+      Name: !Sub ${PJPrefix}-ClusterName-${Environment}
+  ClusterWriterEndpoint:
+    Value: !GetAtt DBCluster.Endpoint.Address
+    Export:
+      Name: !Sub ${PJPrefix}-${Environment}-Cluster-Writer-endpoint
+  RedisEndpoint:
+    Value: !GetAtt ElastiCacheReplicationGroup.ConfigurationEndPoint.Address
+    Export:
+      Name: !Sub ${PJPrefix}-${Environment}-Redis-Endpoint

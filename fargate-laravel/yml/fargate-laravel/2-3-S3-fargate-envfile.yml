@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Create S3Bucket For Fargate .env File
+        Parameters:
+          - S3BucketName
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  S3BucketName:
+    Type: String
+    Default: fargate-environment-variable
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${PJPrefix}-${S3BucketName}
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+  S3BucketName:
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub ${PJPrefix}-${S3BucketName}-name
+  S3BucketArn:
+    Value: !GetAtt S3Bucket.Arn
+    Export:
+      Name: !Sub ${PJPrefix}-${S3BucketName}-arn

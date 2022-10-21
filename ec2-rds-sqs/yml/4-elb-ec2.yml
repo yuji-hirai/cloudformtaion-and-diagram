@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: elb-ec2
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: EC2 Configuration
+        Parameters:
+          - AMIId
+
+Parameters:
+  AMIId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      VpcId: !ImportValue vpc
+      Name: ec2
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /
+      Targets:
+        - Id: !Ref EC2Instance1
+          Port: 80
+        - Id: !Ref EC2Instance2
+          Port: 80
+
+  InternetALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: elb
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      SecurityGroups:
+        - Fn::ImportValue: elb
+      Subnets:
+        - !ImportValue public-subnet-a
+        - !ImportValue public-subnet-c
+
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref InternetALB
+      Port: 80
+      Protocol: HTTP
+
+  IAMRoleForEC2:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: RoleForEC2
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # - arn:aws:iam::aws:policy/PowerUserAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Description: Allows EC2 to call AWS services on your behalf.
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - Ref: IAMRoleForEC2
+      InstanceProfileName: ec2-instance-profile
+
+  EC2Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceType: t2.micro
+      SubnetId: !ImportValue public-subnet-a
+      SecurityGroupIds:
+        - Fn::ImportValue: ec2
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData: !Base64 |
+        #!/bin/bash
+        yum update -y
+        yum install -y httpd
+        systemctl start httpd
+        systemctl enable httpd
+        touch /var/www/html/index.html
+        echo "public-subnet-a" | tee -a /var/www/html/index.html
+        yum install -y https://dev.mysql.com/get/mysql80-community-release-el7-3.noarch.rpm
+        rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022
+        yum install -y mysql
+        amazon-linux-extras install -y ruby2.6
+        gem install aws-sdk-sqs
+
+  EC2Instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceType: t2.micro
+      SubnetId: !ImportValue public-subnet-c
+      SecurityGroupIds:
+        - Fn::ImportValue: ec2
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData: !Base64 |
+        #!/bin/bash
+        yum update -y
+        yum install -y httpd
+        systemctl start httpd
+        systemctl enable httpd
+        touch /var/www/html/index.html
+        echo "public-subnet-c" | tee -a /var/www/html/index.html
+        yum install -y https://dev.mysql.com/get/mysql80-community-release-el7-3.noarch.rpm
+        rpm --import https://repo.mysql.com/RPM-GPG-KEY-mysql-2022
+        yum install -y mysql
+        amazon-linux-extras install -y ruby2.6
+        gem install aws-sdk-sqs
+
+  ElasticIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ElasticIPAssociate1:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIP1.AllocationId
+      InstanceId: !Ref EC2Instance1
+
+  ElasticIP2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ElasticIPAssociate2:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIP2.AllocationId
+      InstanceId: !Ref EC2Instance2

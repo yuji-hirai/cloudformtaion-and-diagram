@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: 
+  S3 and CloudFront for Static website hosting (OAI Available)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: 
+          default: "S3 and CloudFront Configuration"
+        Parameters: 
+          - BucketName
+          - WebsiteDomainName
+          - CFSSLCertificateId
+
+    ParameterLabels: 
+      BucketName:
+        default: "BucketName"
+      WebsiteDomainName:
+        default: "WebsiteDomainName"
+      CFSSLCertificateId: 
+        default: "CFSSLCertificateId"
+
+# ------------------------------------------------------------#
+# Input Parameters
+# ------------------------------------------------------------# 
+Parameters:
+  BucketName:
+    Type: String
+
+  WebsiteDomainName:
+    Type: String
+
+  CFSSLCertificateId:
+    Type: String
+
+Resources:
+# ------------------------------------------------------------#
+#  S3 Bucket
+# ------------------------------------------------------------#        
+# Bucket
+  Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Ref BucketName
+
+  CloudFrontOriginAccessIdentity:
+    Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "access-identity-${Bucket}"
+
+  BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Statement:
+        - Action: "s3:GetObject"
+          Effect: Allow
+          Resource: !Sub "arn:aws:s3:::${Bucket}/*"
+          Principal:
+            CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+
+# ------------------------------------------------------------#
+#  CloudFront
+# ------------------------------------------------------------#  
+  CloudFrontDistribution:
+    Type: "AWS::CloudFront::Distribution"
+    Properties:
+      DistributionConfig:
+        PriceClass: PriceClass_All
+        Aliases:
+        - !Ref WebsiteDomainName
+        Origins:
+        - DomainName: !GetAtt Bucket.RegionalDomainName
+          Id: !Sub "S3origin-${BucketName}"
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub "S3origin-${BucketName}"
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+          - DELETE
+          - GET
+          - HEAD
+          - OPTIONS
+          - PATCH
+          - POST
+          - PUT
+          DefaultTTL: 0
+          MaxTTL: 0
+          MinTTL: 0
+          Compress: true
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            QueryString: false
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.1_2016
+          AcmCertificateArn: !Sub "arn:aws:acm:us-east-1:${AWS::AccountId}:certificate/${CFSSLCertificateId}"
+        HttpVersion: http2
+        Enabled: true
+
+# ------------------------------------------------------------#
+# Output Parameters
+# ------------------------------------------------------------#  
+Outputs:
+#BucketName
+  BucketName:
+    Value: !Ref Bucket
+
+#DistributionID
+  DistributionID:
+    Value: !Ref CloudFrontDistribution
+
+#DmainName
+  DomainName:
+    Value: !GetAtt CloudFrontDistribution.DomainName

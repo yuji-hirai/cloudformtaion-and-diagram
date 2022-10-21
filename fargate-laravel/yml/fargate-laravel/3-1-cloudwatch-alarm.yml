@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project if necessary
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Environment
+        Parameters:
+          - Environment
+      - Label:
+          default: Lambda Configration
+        Parameters:
+          - LambdaName
+          - WebhookURL
+          - Runtime
+      - Label:
+          default: ECS Service Name
+        Parameters:
+          - ECSServiceName
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  ECSServiceName:
+    Type: String
+    Default: laravel
+  LambdaName:
+    Type: String
+    Default: notify-cloudwatch_alarm-to-slack
+  WebhookURL:
+    Description: Get Webhook URL With Incoming Webhook
+    Type: String
+  Runtime:
+    Type: String
+    Description: For exmaple python3.9
+
+Resources:
+  AlarmFargateTaskCount:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate TaskCount 0
+      AlarmDescription: !Sub ${Environment}環境、fargateのタスク数が0になりました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: RunningTaskCount
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: missing
+  AlarmFargateCPU80:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate CPU 80
+      AlarmDescription: !Sub ${Environment}環境、fargateのCPUが80%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CpuUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmFargateCPU90:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate CPU 90
+      AlarmDescription: !Sub ${Environment}環境、fargateのCPUが90%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CpuUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmFargateCPU99:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate CPU 99
+      AlarmDescription: !Sub ${Environment}環境、fargateのCPUが99%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CpuUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 99
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmFargateMemory80:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate Memory 80
+      AlarmDescription: !Sub ${Environment}環境、fargateのMemoryが80%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: MemoryUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmFargateMemory90:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate Memory 90
+      AlarmDescription: !Sub ${Environment}環境、fargateのMemoryが90%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: MemoryUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmFargateMemory99:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} fargate Memory 99
+      AlarmDescription: !Sub ${Environment}環境、fargateのMemoryが99%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: MemoryUtilized
+      Namespace: ECS/ContainerInsights
+      Statistic: Average
+      Dimensions:
+        - Name: ServiceName
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+        - Name: ClusterName
+          Value: !Sub ${PJPrefix}-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 99
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmRDSCPU80:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} RDS CPU 80
+      AlarmDescription: !Sub ${Environment}環境、RDSのCPUが80%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Dimensions:
+        - Name: Role
+          Value: WRITER
+        - Name: DBClusterIdentifier
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-ClusterName-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmRDSCPU90:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} RDS CPU 90
+      AlarmDescription: !Sub ${Environment}環境、RDSのCPUが90%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Dimensions:
+        - Name: Role
+          Value: WRITER
+        - Name: DBClusterIdentifier
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-ClusterName-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  AlarmRDSCPU99:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${PJPrefix}-${Environment} RDS CPU 99
+      AlarmDescription: !Sub ${Environment}環境、RDSのCPUが99%を超えました。
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref SNSTopic
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Dimensions:
+        - Name: Role
+          Value: WRITER
+        - Name: DBClusterIdentifier
+          Value:
+            Fn::ImportValue: !Sub ${PJPrefix}-ClusterName-${Environment}
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 99
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: ''
+      TopicName: !Sub ${PJPrefix}-cloudwatch-alarms-to-slack-${Environment}
+
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SNSTopic
+      Endpoint: !GetAtt LambdaFunction.Arn
+      Protocol: lambda
+      Region: !Ref AWS::Region
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment:
+        Variables:
+          WebhookURL: !Ref WebhookURL
+          ProjectName: !Ref PJPrefix
+      FunctionName: !Sub ${PJPrefix}-${LambdaName}-${Environment}
+      Handler: index.lambda_handler
+      Role: !GetAtt IAMRole.Arn
+      Runtime: !Ref Runtime
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import os
+
+          from base64 import b64decode
+          from urllib.request import Request, urlopen
+          from urllib.error import URLError, HTTPError
+
+          HOOK_URL = os.environ['WebhookURL']
+          PROJECT_NAME = os.environ['ProjectName']
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+
+          def lambda_handler(event, context):
+              logger.info("Event: " + str(event))
+              message = json.loads(event['Records'][0]['Sns']['Message'])
+              logger.info("Message: " + str(message))
+
+              reason = message['NewStateReason']
+              alarm_description = message['AlarmDescription']
+
+              slack_message = {
+                'text': "<!channel>:exclamation: *%s* \nアラーム: *%s*\n\nアラーム詳細: %s\n確認中は:eyes:、完了後は:white_check_mark:をお願いします" % (PROJECT_NAME, alarm_description, reason )
+              }
+
+              req = Request(HOOK_URL, json.dumps(slack_message).encode('utf-8'))
+              try:
+                  response = urlopen(req)
+                  response.read()
+              except HTTPError as e:
+                  logger.error("Request failed: %d %s", e.code, e.reason)
+              except URLError as e:
+                  logger.error("Server connection failed: %s", e.reason)
+
+  IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub ${PJPrefix}-${LambdaName}-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref IAMPolicy
+
+  IAMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${PJPrefix}-${LambdaName}-${Environment}-policy
+      Path: /service-role/
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${PJPrefix}-${LambdaName}-${Environment}:*
+            Effect: Allow
+            Action:
+              - logs:PutLogEvents
+              - logs:CreateLogStream

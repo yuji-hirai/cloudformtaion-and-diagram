@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Once per account
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Account Name
+        Parameters:
+          - AccountName
+      - Label:
+          default: IP Limit
+        Parameters:
+          - IPLimit1
+          - IPLimit2
+
+Parameters:
+  AccountName:
+    Type: String
+    Description: For example kyt tsumagari
+  IPLimit1:
+    Type: String
+    Default: '35.74.76.13/32'
+  IPLimit2:
+    Type: String
+    Default: '153.231.17.16/32'
+
+Resources:
+  IAMUserECS:
+    Type: AWS::IAM::User
+    Properties:
+      Path: /
+      UserName: !Sub ${AccountName}-ecs-operator
+      ManagedPolicyArns:
+        - !Ref IAMPolicyFromLocal
+        - !Ref IAMPolicyFargateScheduleAScaling
+        - !Ref IAMPolicyECRPush
+
+  IAMRoleEcsTaskExecution:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: ecsTaskExecutionRoleOrigin
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  IAMPolicyFromLocal:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AccountName}-ECS-Exec-From-Local
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource:
+              - !Sub arn:aws:ecs:*:${AWS::AccountId}:cluster/*
+              - !Sub arn:aws:ecs:*:${AWS::AccountId}:service/*
+              - !Sub arn:aws:ecs:*:${AWS::AccountId}:task/*
+            Effect: Allow
+            Action:
+              - ecs:UpdateService
+              - ecs:ExecuteCommand
+              - ecs:DescribeTasks
+              - ecs:DescribeServices
+              - ecs:UpdateServicePrimaryTaskSet
+            Condition:
+              ForAnyValue:IpAddress:
+                aws:SourceIp:
+                  - !Ref IPLimit1
+                  - !Ref IPLimit2
+
+  IAMPolicyFargateScheduleAScaling:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AccountName}-fargate-schedule-auto-scaling
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - application-autoscaling:DeleteScheduledAction
+              - application-autoscaling:DescribeScheduledActions
+              - application-autoscaling:PutScheduledAction
+            Condition:
+              ForAnyValue:IpAddress:
+                aws:SourceIp:
+                  - !Ref IPLimit1
+                  - !Ref IPLimit2
+
+  IAMPolicyECRPush:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AccountName}-ecr-push
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource: !Sub arn:aws:ecr:*:${AWS::AccountId}:repository/*
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+            Condition:
+              ForAnyValue:IpAddress:
+                aws:SourceIp:
+                  - !Ref IPLimit1
+                  - !Ref IPLimit2
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Condition:
+              ForAnyValue:IpAddress:
+                aws:SourceIp:
+                  - !Ref IPLimit1
+                  - !Ref IPLimit2
+
+  # StackSetsで使用
+  AdministrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSCloudFormationStackSetAdministrationRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: AssumeExecutionRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource:
+                  - arn:aws:iam::*:role/AWSCloudFormationStackSetExecutionRole
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSCloudFormationStackSetExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub ${AWS::AccountId}
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
+
+Outputs:
+  IAMRoleEcsTaskExecution:
+    Value: !GetAtt IAMRoleEcsTaskExecution.Arn
+    Export:
+      Name: ecsTaskExecutionRole

@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Once per account
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Lambda Configration
+        Parameters:
+          - LambdaName
+          - Runtime
+
+Parameters:
+  Runtime:
+    Type: String
+    Description: For example python3.9
+  LambdaName:
+    Type: String
+    Default: cf-cache-clear-in-codepipeline
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref LambdaName
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaIAMRole.Arn
+      Runtime: !Ref Runtime
+      Timeout: 30
+      Code:
+        ZipFile: |
+          from __future__ import print_function
+
+          import boto3
+          import json
+          import time
+
+          cp = boto3.client('codepipeline')
+          cf = boto3.client('cloudfront')
+
+          # codepipelineへ成功jobを返答する
+          def put_job_success(job_id):
+              cp.put_job_success_result(jobId=job_id)
+
+          # codepipelineへ失敗jobを返答する
+          def put_job_failure(job_id, err):
+              message = 'Function exception: ' + str(err)
+              cp.put_job_failure_result(
+                  jobId=job_id,
+                  failureDetails={
+                      'type': 'JobFailed',
+                      'message': message
+                  }
+              )
+
+          # lambdaのmain関数
+          def lambda_handler(event, context):
+              try:
+                  job_id = event['CodePipeline.job']['id']
+                  job_data = event['CodePipeline.job']['data']
+              
+                  user_parameters = json.loads(
+                          job_data['actionConfiguration']['configuration']['UserParameters']
+                      )
+              
+                  pipeline_name = user_parameters['PipelineName']
+                  distribution_id = user_parameters['DistributionId']
+                  
+                  res = cf.create_invalidation(
+                      DistributionId=distribution_id,
+                      InvalidationBatch={
+                      'Paths': {
+                          'Quantity': 1,
+                          'Items': ['/*'],
+                      },
+                      'CallerReference': str(time.time())
+                      }
+                  )
+                  put_job_success(job_id)
+              
+              except Exception as err:
+                  put_job_failure(job_id, err)
+                  
+              return "Complete."
+
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Ref LambdaName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref LambdaIAMPolicy
+
+  LambdaIAMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref LambdaName
+      Path: /service-role/
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${LambdaName}:*
+            Effect: Allow
+            Action:
+              - logs:PutLogEvents
+              - logs:CreateLogStream
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - codepipeline:PutJobFailureResult
+              - codepipeline:PutJobSuccessResult
+              - cloudfront:CreateInvalidation
+
+Outputs:
+  LambdaFunctionName:
+    Value: !Ref LambdaFunction
+    Export:
+      Name: !Ref LambdaName

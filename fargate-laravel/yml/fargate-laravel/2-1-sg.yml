@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+
+Resources:
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: !Sub ${PJPrefix}-elb-${Environment}
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: !Sub ${PJPrefix}-elb-${Environment}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: !Sub ${PJPrefix}-fargate-${Environment}
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: !Sub ${PJPrefix}-fargate-${Environment}
+
+  WebSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${PJPrefix}-elb-${Environment}
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !GetAtt [ELBSecurityGroup, GroupId]
+      GroupId: !GetAtt [WebSecurityGroup, GroupId]
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: !Sub ${PJPrefix}-rds-${Environment}
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: !Sub ${PJPrefix}-rds-${Environment}
+
+  SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${PJPrefix}-fargate-${Environment}
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !GetAtt [WebSecurityGroup, GroupId]
+      GroupId: !GetAtt [RDSSecurityGroup, GroupId]
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: !Sub ${PJPrefix}-redis-${Environment}
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: !Sub ${PJPrefix}-redis-${Environment}
+
+  RedisSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: !Sub ${PJPrefix}-fargate-${Environment}
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !GetAtt [WebSecurityGroup, GroupId]
+      GroupId: !GetAtt [RedisSecurityGroup, GroupId]
+
+Outputs:
+  WebSecurityGroup:
+    Value: !Ref WebSecurityGroup
+    Export:
+      Name: !Sub ${PJPrefix}-fargate-${Environment}
+  ELBSecurityGroup:
+    Value: !Ref ELBSecurityGroup
+    Export:
+      Name: !Sub ${PJPrefix}-elb-${Environment}
+  RDSSecurityGroup:
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub ${PJPrefix}-rds-${Environment}
+  RedisSecurityGroup:
+    Value: !Ref RedisSecurityGroup
+    Export:
+      Name: !Sub ${PJPrefix}-redis-${Environment}

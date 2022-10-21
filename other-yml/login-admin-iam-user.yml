@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Once per account
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Account name
+        Parameters:
+          - AccountName
+      - Label:
+          default: User name
+        Parameters:
+          - UserName1
+          - UserName2
+          - UserName3
+      - Label:
+          default: Password should have at least one uppercase letter and number and symbol. (20 characters or more)
+        Parameters:
+          - UserPassword1
+          - UserPassword2
+          - UserPassword3
+
+Parameters:
+  AccountName:
+    Type: String
+    Description: For example quail, kyt, tsumagari
+  UserName1:
+    Type: String
+    Description: For example ikeda
+  UserName2:
+    Type: String
+    Description: For example ikeda
+  UserName3:
+    Type: String
+    Description: For example ikeda
+  UserPassword1:
+    Type: String
+    NoEcho: true
+  UserPassword2:
+    Type: String
+    NoEcho: true
+  UserPassword3:
+    Type: String
+    NoEcho: true
+
+Resources:
+  AdminUserGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: AdminUserGroup
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+  User1:
+    Type: AWS::IAM::User
+    Properties:
+      LoginProfile:
+        Password: !Ref UserPassword1
+        PasswordResetRequired: False
+      Groups:
+        - AdminUserGroup
+      UserName: !Sub ${UserName1}@${AccountName}
+  User2:
+    Type: AWS::IAM::User
+    Properties:
+      LoginProfile:
+        Password: !Ref UserPassword2
+        PasswordResetRequired: False
+      Groups:
+        - !Ref AdminUserGroup
+      UserName: !Sub ${UserName2}@${AccountName}
+  User3:
+    Type: AWS::IAM::User
+    Properties:
+      LoginProfile:
+        Password: !Ref UserPassword3
+        PasswordResetRequired: False
+      Groups:
+        - !Ref AdminUserGroup
+      UserName: !Sub ${UserName3}@${AccountName}
+
+Outputs:
+  LoginURL:
+    Description: LoginURL
+    Value: !Sub https://${AWS::AccountId}.signin.aws.amazon.com/console

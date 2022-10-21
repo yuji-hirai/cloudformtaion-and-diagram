@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: aurora
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: RDS Configuration
+        Parameters:
+          - DatabaseName
+          - MasterUsername
+          - MasterUserPassword
+
+Parameters:
+  DatabaseName:
+    Type: String
+    Default: database_name
+  MasterUsername:
+    Type: String
+    MinLength: 4
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  MasterUserPassword:
+    NoEcho: true
+    Type: String
+    MinLength: 4
+    MaxLength: 50
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+
+Resources:
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: instance
+      Engine: MySQL
+      EngineVersion: 5.7.34
+      DBInstanceClass: db.t2.micro
+      AllocatedStorage: 30
+      StorageType: gp2
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      MultiAZ: true
+      PreferredBackupWindow: 16:00-17:00
+      PreferredMaintenanceWindow: tue:18:00-tue:19:00
+      AutoMinorVersionUpgrade: false
+      DBParameterGroupName: !Ref DBParameterGroup
+      VPCSecurityGroups:
+        - Fn::ImportValue: rds
+      BackupRetentionPeriod: 7
+    DeletionPolicy: Delete
+
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: MySQL5.7
+      Description: db-parameter-group
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: db-subnet-group
+      DBSubnetGroupDescription: '-'
+      SubnetIds:
+        - !ImportValue private-subnet-a
+        - !ImportValue private-subnet-c

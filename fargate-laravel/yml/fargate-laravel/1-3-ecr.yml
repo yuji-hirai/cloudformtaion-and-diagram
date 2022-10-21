@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: ECSServiceName
+        Parameters:
+          - ECSServiceName
+      - Label:
+          default: ContainerPHP
+        Parameters:
+          - ContainerPHP
+      - Label:
+          default: ContainerNginx
+        Parameters:
+          - ContainerNginx
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  ECSServiceName:
+    Type: String
+    Default: laravel
+  ContainerPHP:
+    Type: String
+    Default: php
+  ContainerNginx:
+    Type: String
+    Default: nginx
+
+Resources:
+  MyServiceRepository1:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerPHP}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "タグなしのイメージを1週間で削除",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+        RegistryId: !Ref AWS::AccountId
+
+  MyServiceRepository2:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerNginx}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "タグなしのイメージを1週間で削除",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+        RegistryId: !Ref AWS::AccountId
+
+Outputs:
+  MyServiceRepository1:
+    Value: !GetAtt MyServiceRepository1.RepositoryUri
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerPHP}-ecr-uri
+  MyServiceRepository2:
+    Value: !GetAtt MyServiceRepository2.RepositoryUri
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerNginx}-ecr-uri

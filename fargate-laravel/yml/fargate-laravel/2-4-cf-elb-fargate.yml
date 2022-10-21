@@ -1,0 +1,461 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Environment
+        Parameters:
+          - Environment
+      - Label:
+          default: Fargate Configuration
+        Parameters:
+          - ECSTaskCPUUnit
+          - ECSTaskMemory
+          - ContainerNginx
+          - ContainerPHP
+          - ECSServiceName
+          - ECSTaskDesiredCount
+          - TGHealthCheckPath
+          - ReadOnlyRootFileSystem
+      - Label:
+          default: IP Limit
+        Parameters:
+          - IPLimit1
+          - IPLimit2
+      - Label:
+          default: FARGATE or FARGATE_SPOT to Use in Base
+        Parameters:
+          - CapacityProviderFargate
+          - CapacityProviderFargateSpot
+      - Label:
+          default: S3 Bucket for fargate env
+        Parameters:
+          - S3BucketName
+          - S3BucketEnvFileName
+      - Label:
+          default: Host zone ID of route53
+        Parameters:
+          - HostZoneId
+      - Label:
+          default: Arn of AWS Certificate Manager in us-east-1
+        Parameters:
+          - CertificateArnUSEast
+      - Label:
+          default: Arn of AWS Certificate Manager in ap-northeast-1
+        Parameters:
+          - CertificateArnApNortheast
+      - Label:
+          default: Record name you want to route to cloudfront
+        Parameters:
+          - RecordName
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  ReadOnlyRootFileSystem:
+    Type: String
+    AllowedValues:
+      - true
+      - false
+  ECSTaskCPUUnit:
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Type: String
+    Default: '256'
+  ECSTaskMemory:
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Type: String
+    Default: '512'
+  ContainerNginx:
+    Type: String
+    Default: nginx
+  ContainerPHP:
+    Type: String
+    Default: php
+  ECSServiceName:
+    Type: String
+    Default: laravel
+  ECSTaskDesiredCount:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 1
+  TGHealthCheckPath:
+    Type: String
+    Default: /healthcheck
+  IPLimit1:
+    Type: String
+    Default: '35.74.76.13'
+  IPLimit2:
+    Type: String
+    Default: '153.231.17.16'
+  CapacityProviderFargate:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 1
+  CapacityProviderFargateSpot:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 0
+  S3BucketName:
+    Type: String
+    Description: Bucket Name :{PJPrefix}-fargate-environment-variable
+  S3BucketEnvFileName:
+    Description: File Name :{PJPrefix}-laravel-{Environment}.env
+    Type: String
+  HostZoneId:
+    Type: String
+    Description: For example Z111111QQQQQQQQQQQQ
+  CertificateArnUSEast:
+    Type: String
+    Description: For example arn:aws:acm:us-east-1:certificate/xxxxxxxxx
+  CertificateArnApNortheast:
+    Type: String
+    Description: For example arn:aws:acm:ap-northeast-1:certificate/xxxxxxxxx
+  RecordName:
+    Type: String
+    Description: For example www.test.com
+
+Resources:
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      VpcId: !ImportValue vpc
+      Name: !Sub ${PJPrefix}-fargate-${Environment}
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      HealthCheckPath: !Ref TGHealthCheckPath
+
+  InternetALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${PJPrefix}-${Environment}
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      SecurityGroups:
+        - Fn::ImportValue: !Sub ${PJPrefix}-elb-${Environment}
+      Subnets:
+        - !ImportValue public-subnet-a
+        - !ImportValue public-subnet-c
+        - !ImportValue public-subnet-d
+
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Order: 1
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: 443
+            Host: '#{host}'
+            Path: '/#{path}'
+            Query: '#{query}'
+            StatusCode: HTTP_301
+          Type: redirect
+      LoadBalancerArn: !Ref InternetALB
+      Port: 80
+      Protocol: HTTP
+
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - FixedResponseConfig:
+            StatusCode: 503
+            ContentType: text/plain
+          Order: 1
+          Type: fixed-response
+      LoadBalancerArn: !Ref InternetALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArnApNortheast
+
+  ALBListenerRule1:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Priority: 2
+      ListenerArn: !Ref ALBListenerHTTPS
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Forwarded-For
+            Values:
+              - !Ref IPLimit1
+              - !Ref IPLimit2
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+          Order: 1
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref TargetGroup
+                Weight: 1
+
+  ALBListenerRule2:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Priority: 3
+      ListenerArn: !Ref ALBListenerHTTPS
+      Conditions:
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - !Sub ${IPLimit1}/32
+              - !Sub ${IPLimit2}/32
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+          Order: 1
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref TargetGroup
+                Weight: 1
+
+  IAMRoleForFargate:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: !Sub ${PJPrefix}-ECS-Exec-Fargate-${ECSServiceName}-${Environment}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref IAMPolicyFargateExec
+      Description: Allows ECS tasks to call AWS services on your behalf.
+
+  IAMPolicyFargateExec:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${PJPrefix}-ECS-Exec-Fargate-${ECSServiceName}-${Environment}
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:CreateControlChannel
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${PJPrefix}-${Environment}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Base: !Ref CapacityProviderFargate
+          Weight: 0
+        - CapacityProvider: FARGATE_SPOT
+          Base: !Ref CapacityProviderFargateSpot
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${PJPrefix}-${ECSServiceName}-${Environment}
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: !Ref ECSTaskCPUUnit
+      TaskRoleArn: !GetAtt IAMRoleForFargate.Arn
+      ExecutionRoleArn: !ImportValue ecsTaskExecutionRole
+      Family: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+      Memory: !Ref ECSTaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: !Sub ${ContainerNginx}
+          ReadonlyRootFilesystem: !Ref ReadOnlyRootFileSystem
+          Image: !Sub
+            - ${ECRNginxURI}:${Environment}
+            - ECRNginxURI:
+                Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerNginx}-ecr-uri
+              Environment: !Ref Environment
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+        - Name: !Sub ${ContainerPHP}
+          ReadonlyRootFilesystem: !Ref ReadOnlyRootFileSystem
+          Image: !Sub
+            - ${ECRNginxURI}:${Environment}
+            - ECRNginxURI:
+                Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerPHP}-ecr-uri
+          Command:
+            - php artisan config:cache && php artisan view:cache && php artisan route:cache && php artisan migrate --force && chown -hR www-data:www-data /var/www/html/bootstrap/cache /var/www/html/storage/framework /var/www/html/storage/logs /var/www/html/storage/tmp && php-fpm && composer install --optimize-autoloader --no-dev
+          EntryPoint:
+            - sh
+            - -c
+          EnvironmentFiles:
+            - Value: !Sub
+                - ${S3Arn}/${S3BucketEnvFileName}
+                - S3Arn:
+                    Fn::ImportValue: !Sub ${S3BucketName}-arn
+              Type: s3
+          WorkingDirectory: /var/www/html
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+              awslogs-datetime-format: '%Y-%m-%d %H:%M:%S'
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListenerRule1
+    Properties:
+      ServiceName: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref ECSTaskDesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref ECSTaskDefinition
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerPort: 80
+          ContainerName: !Ref ContainerNginx
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub ${PJPrefix}-fargate-${Environment}
+          Subnets:
+            - !ImportValue public-subnet-a
+            - !ImportValue public-subnet-c
+            - !ImportValue public-subnet-d
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref RecordName
+        Origins:
+          - ConnectionAttempts: 3
+            ConnectionTimeout: 10
+            CustomOriginConfig:
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginKeepaliveTimeout: 5
+              OriginProtocolPolicy: match-viewer
+              OriginReadTimeout: 30
+              OriginSSLProtocols:
+                - TLSv1.2
+            DomainName: !GetAtt InternetALB.DNSName
+            Id: !GetAtt InternetALB.DNSName
+            OriginPath: ''
+        OriginGroups:
+          Quantity: 0
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - HEAD
+            - DELETE
+            - POST
+            - GET
+            - OPTIONS
+            - PUT
+            - PATCH
+          CachedMethods:
+            - HEAD
+            - GET
+          Compress: true
+          # キャッシュポリシー指定 (Managed-CachingDisabled)
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # オリジンリクエストポリシー指定 (Managed-AllViewer)
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          SmoothStreaming: false
+          TargetOriginId: !GetAtt InternetALB.DNSName
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_All
+        Enabled: true
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArnUSEast
+          # セキュリティポリシー指定
+          MinimumProtocolVersion: TLSv1.2_2021
+          SslSupportMethod: sni-only
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+        HttpVersion: http2
+        IPV6Enabled: true
+  Route53RecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Name: !Sub ${RecordName}.
+      HostedZoneId: !Ref HostZoneId
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        # Z2FDTNDATAQYW2は、固定値
+        HostedZoneId: Z2FDTNDATAQYW2
+
+Outputs:
+  # ALBDNSName:
+  #   Value: !GetAtt InternetALB.DNSName
+  #   Export:
+  #     Name: !Sub ${PJPrefix}-elb-dnsName
+  # ALBHostedZoneID:
+  #   Value: !GetAtt InternetALB.CanonicalHostedZoneID
+  #   Export:
+  #     Name: !Sub ${PJPrefix}-elb-hostedZoneID
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-cluster
+  ECSLogGroupArn:
+    Value: !GetAtt ECSLogGroup.Arn
+    Export:
+      Name: !Sub ${PJPrefix}-ecs-log-group-arn-${Environment}
+  ECSLogGroupName:
+    Value: !Ref ECSLogGroup
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-log-group-name-${Environment}
+  ECSService:
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-service-name
+  CloudFrontId:
+    Value: !GetAtt CloudFrontDistribution.Id
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-${Environment}-id

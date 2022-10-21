@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each environment of project if necessary
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Environment
+        Parameters:
+          - Environment
+      - Label:
+          default: Fargate for ECS Configuration
+        Parameters:
+          - ECSServiceName
+      - Label:
+          default: Filter pattern of alarm
+        Parameters:
+          - FilterString
+      - Label:
+          default: Lambda Configration
+        Parameters:
+          - LambdaName
+          - WebhookURL
+          - Runtime
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  Environment:
+    Type: String
+    AllowedValues:
+      - prod
+      - dev
+      - stg
+  ECSServiceName:
+    Type: String
+    Default: laravel
+  LambdaName:
+    Type: String
+    Default: subscription_filter-alert-to-slack
+  WebhookURL:
+    Description: Get Webhook URL With Incoming Webhook
+    Type: String
+  Runtime:
+    Type: String
+    Description: For exmaple python3.9
+  FilterString:
+    Description: Error string you want to notify Slack
+    Type: String
+    Default: ERROR
+
+
+Resources:
+  LogsSubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      LogGroupName:
+        Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-log-group-name-${Environment}
+      FilterPattern: !Ref FilterString
+      DestinationArn: !GetAtt LambdaFunction.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment:
+        Variables:
+          WebhookURL: !Ref WebhookURL
+          env: !Ref Environment
+          ProjectName: !Ref PJPrefix
+          Service: !Ref ECSServiceName
+      FunctionName: !Sub ${PJPrefix}-${LambdaName}-${Environment}
+      Handler: index.lambda_handler
+      Role: !GetAtt IAMRole.Arn
+      Runtime: !Ref Runtime
+      Code:
+        ZipFile: |
+          import json
+          import logging
+          import os
+          import base64
+          import gzip
+          import urllib.request
+
+          HOOK_URL = os.environ['WebhookURL']
+          PROJECT_NAME = os.environ['ProjectName']
+          SERVICE = os.environ['Service']
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+
+              # CloudWatchLogsからのデータはbase64エンコードされているのでデコード
+              decoded_data = base64.b64decode(event['awslogs']['data'])
+
+              # バイナリに圧縮されているため展開
+              json_data = json.loads(gzip.decompress(decoded_data))
+
+              # CloudWatch Logsに複合化&解凍したログを出力
+              logger.info("Event: " + json.dumps(json_data))
+
+              # ログデータ取得
+              error_message = json_data['logEvents'][0]['message']
+
+              # CloudWatch Logsにerror_messageの内容のみをログを出力
+              logger.info("Message: " + str(error_message))
+              if os.environ['env'] == "prod":
+                environment = "本番"
+              elif os.environ['env'] == "dev":
+                environment = "開発"
+              elif os.environ['env'] == "stg":
+                environment = "ステージング"
+
+              # Slackへのメッセージを作成
+              send_data = {
+              "type": "mrkdwn",
+              "text": "<!channel> %s %s %s環境:exclamation::exclamation:\nLaravelのエラーログを検出しました。ログを確認してください。\n ```%s``` \n確認中は:eyes:、完了後は:white_check_mark:をお願いします" % (PROJECT_NAME, SERVICE, environment, error_message)
+            }
+
+              send_text = json.dumps(send_data)
+
+              request = urllib.request.Request(
+                  HOOK_URL,
+                  data=send_text.encode('utf-8'),
+                  method="POST"
+              )
+              with urllib.request.urlopen(request) as response:
+                  response_body = response.read().decode('utf-8')
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: logs.amazonaws.com
+      SourceArn:
+        Fn::ImportValue: !Sub ${PJPrefix}-ecs-log-group-arn-${Environment}
+
+  IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub ${PJPrefix}-${LambdaName}-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref IAMPolicy
+
+  IAMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${PJPrefix}-${LambdaName}-${Environment}-policy
+      Path: /service-role/
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+          - Resource:
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${PJPrefix}-${LambdaName}-${Environment}:*
+            Effect: Allow
+            Action:
+              - logs:PutLogEvents
+              - logs:CreateLogStream

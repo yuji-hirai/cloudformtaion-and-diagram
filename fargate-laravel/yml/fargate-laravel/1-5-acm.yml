@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project if necessary by Stack Sets
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Host zone ID of route53
+        Parameters:
+          - HostZoneId
+      - Label:
+          default: Domain name created with route53
+        Parameters:
+          - DomainName
+
+Parameters:
+  HostZoneId:
+    Type: String
+    Description: For example Z111111QQQQQQQQQQQQ
+  DomainName:
+    Type: String
+    Description: For example test.com
+
+Resources:
+  ACM:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub ${DomainName}
+      DomainValidationOptions:
+        - DomainName: !Sub ${DomainName}
+          HostedZoneId: !Ref HostZoneId
+      SubjectAlternativeNames:
+        - !Sub '*.${DomainName}'
+      ValidationMethod: DNS
+
+Outputs:
+  ACM:
+    Value: !Ref ACM
+    Export:
+      Name: !Sub acm-arn-${AWS::Region}

@@ -1,0 +1,315 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: Fargate Configuration
+        Parameters:
+          - ECSTaskCPUUnit
+          - ECSTaskMemory
+          - ContainerNginx
+          - ContainerPHP
+          - ECSServiceName
+          - ECSTaskDesiredCount
+          - TGHealthCheckPath
+      - Label:
+          default: IP Limit
+        Parameters:
+          - IPLimit1
+          - IPLimit2
+      - Label:
+          default: FARGATE or FARGATE_SPOT to Use in Base
+        Parameters:
+          - CapacityProviderFargate
+          - CapacityProviderFargateSpot
+      - Label:
+          default: S3 Bucket for fargate env
+        Parameters:
+          - S3BucketName
+          - S3BucketEnvFileName
+      - Label:
+          default: Host zone ID of route53
+        Parameters:
+          - Route53HostZoneID
+      - Label:
+          default: Record name you want to route to elb
+        Parameters:
+          - RecordName
+      - Label:
+          default: Enter the ELB listener arn used by phpMyAdmin
+        Parameters:
+          - ELBListenerArn
+      - Label:
+          default: Host zone ID of ELB
+        Parameters:
+          - ALBHostedZoneID
+      - Label:
+          default: DNS name of ELB
+        Parameters:
+          - ALBDNSName
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  ECSTaskCPUUnit:
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Type: String
+    Default: '256'
+  ECSTaskMemory:
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Type: String
+    Default: '512'
+  ContainerNginx:
+    Type: String
+    Default: nginx
+  ContainerPHP:
+    Type: String
+    Default: php
+  ECSServiceName:
+    Type: String
+    Default: phpmyadmin
+  ECSTaskDesiredCount:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 1
+  TGHealthCheckPath:
+    Type: String
+    Default: /
+  IPLimit1:
+    Type: String
+    Default: '35.74.76.13'
+  IPLimit2:
+    Type: String
+    Default: '153.231.17.16'
+  CapacityProviderFargate:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 0
+  CapacityProviderFargateSpot:
+    AllowedValues: [0, 1]
+    Type: Number
+    Default: 1
+  S3BucketName:
+    Type: String
+    Description: Bucket Name :{PJPrefix}-fargate-environment-variable
+  S3BucketEnvFileName:
+    Description: File Name :{PJPrefix}-phpmyadmin.env
+    Type: String
+  Route53HostZoneID:
+    Type: String
+    Description: For example Z111111QQQQQQQQQQQQ
+  RecordName:
+    Type: String
+    Description: For example pma.test.com
+  ELBListenerArn:
+    Description: Listener Arn arn:aws:elasticloadbalancing:{AWS::Region}:{AWS::AccountId}:listener/app/{PJPrefix}-{Environment}/.....
+    Type: String
+  ALBHostedZoneID:
+    Type: String
+    Description: For example Z111111QQQQQQQQQQQQ
+  ALBDNSName:
+    Type: String
+    Description: For example test-prod-xxxxxxxx.ap-northeast-1.elb.amazonaws.com
+
+Resources:
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+      VpcId: !ImportValue vpc
+      Name: !Sub ${PJPrefix}-${ECSServiceName}
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      HealthCheckPath: !Ref TGHealthCheckPath
+
+  ALBListenerRule1:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Priority: 1
+      ListenerArn: !Ref ELBListenerArn
+      Conditions:
+        - Field: source-ip
+          SourceIpConfig:
+            Values:
+              - !Sub ${IPLimit1}/32
+              - !Sub ${IPLimit2}/32
+        - Field: host-header
+          Values:
+            - !Ref RecordName
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+          Order: 1
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref TargetGroup
+                Weight: 1
+
+  IAMRoleForFargate:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      RoleName: !Sub ${PJPrefix}-ECS-Exec-Fargate-${ECSServiceName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref IAMPolicyFargateExec
+      Description: Allows ECS tasks to call AWS services on your behalf.
+
+  IAMPolicyFargateExec:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${PJPrefix}-ECS-Exec-Fargate-${ECSServiceName}
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource: '*'
+            Effect: Allow
+            Action:
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:CreateControlChannel
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${PJPrefix}-${ECSServiceName}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Base: !Ref CapacityProviderFargate
+          Weight: 0
+        - CapacityProvider: FARGATE_SPOT
+          Base: !Ref CapacityProviderFargateSpot
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${PJPrefix}-${ECSServiceName}
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: !Ref ECSTaskCPUUnit
+      TaskRoleArn: !GetAtt IAMRoleForFargate.Arn
+      ExecutionRoleArn: !ImportValue ecsTaskExecutionRole
+      Family: !Sub ${PJPrefix}-${ECSServiceName}
+      Memory: !Ref ECSTaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: !Sub ${ContainerNginx}
+          Image: !Sub
+            - ${ECRNginxURI}:latest
+            - ECRNginxURI:
+                Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerNginx}-ecr-uri
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+          EnvironmentFiles:
+            - Value: !Sub
+                - ${S3Arn}/${S3BucketEnvFileName}
+                - S3Arn:
+                    Fn::ImportValue: !Sub ${S3BucketName}-arn
+              Type: s3
+        - Name: !Sub ${ContainerPHP}
+          Image: !Sub
+            - ${ECRNginxURI}:latest
+            - ECRNginxURI:
+                Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}-${ContainerPHP}-ecr-uri
+          EnvironmentFiles:
+            - Value: !Sub
+                - ${S3Arn}/${S3BucketEnvFileName}
+                - S3Arn:
+                    Fn::ImportValue: !Sub ${S3BucketName}-arn
+              Type: s3
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+              awslogs-datetime-format: '%Y-%m-%d %H:%M:%S'
+
+  Route53RecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Name: !Sub ${RecordName}.
+      HostedZoneId: !Ref Route53HostZoneID
+      Type: A
+      AliasTarget:
+        DNSName: !Ref ALBDNSName
+        HostedZoneId: !Ref ALBHostedZoneID
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListenerRule1
+    Properties:
+      ServiceName: !Sub ${PJPrefix}-${ECSServiceName}
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref ECSTaskDesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref ECSTaskDefinition
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerPort: 80
+          ContainerName: !Ref ContainerNginx
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub ${PJPrefix}-${ECSServiceName}
+          Subnets:
+            - !ImportValue public-subnet-a
+            - !ImportValue public-subnet-c
+            - !ImportValue public-subnet-d
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-cluster
+  ECSLogGroupArn:
+    Value: !GetAtt ECSLogGroup.Arn
+    Export:
+      Name: !Sub ${PJPrefix}-ecs-log-group-arn
+  ECSLogGroupName:
+    Value: !Sub /ecs/${PJPrefix}-${ECSServiceName}
+    Export:
+      Name: !Sub ${PJPrefix}-ecs-${ECSServiceName}-log-group-name
+  ECSService:
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}-service-name

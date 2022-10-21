@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project if necessary
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Domain name you want to create
+        Parameters:
+          - DomainName
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: For example test.com
+Resources:
+  Route53:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref DomainName

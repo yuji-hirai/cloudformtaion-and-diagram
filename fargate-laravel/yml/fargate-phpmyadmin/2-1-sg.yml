@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: For each project
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Project Name Prefix
+        Parameters:
+          - PJPrefix
+      - Label:
+          default: ECSServiceName
+        Parameters:
+          - ECSServiceName
+      - Label:
+          default: Enter the ELB security group ID you want to allow in the phpMyAdmin security group inbound rules
+        Parameters:
+          - ELBSecurityGroupId
+
+Parameters:
+  PJPrefix:
+    Type: String
+    Description: For example kyt-web kyt-app tsumagari
+  ELBSecurityGroupId:
+    Type: String
+    Description: For example sg-xxxxxxxxxxxxxxxxx
+  ECSServiceName:
+    Type: String
+    Default: phpmyadmin
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !ImportValue vpc
+      GroupName: !Sub ${PJPrefix}-${ECSServiceName}
+      GroupDescription: '-'
+      Tags:
+        - Key: Name
+          Value: !Sub ${PJPrefix}-${ECSServiceName}
+
+  WebSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: elb
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref ELBSecurityGroupId
+      GroupId: !GetAtt [WebSecurityGroup, GroupId]
+
+Outputs:
+  WebSecurityGroup:
+    Value: !Ref WebSecurityGroup
+    Export:
+      Name: !Sub ${PJPrefix}-${ECSServiceName}
